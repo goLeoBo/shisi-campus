@@ -55,8 +55,41 @@ function fmtCount(n) {
 }
 
 function avatarHTML(user, size = '') {
-  const a = user.avatar || { char: '?', color: '#888' };
+  if (user && user.avatarUrl) {
+    return `<span class="avatar ${size}"><img src="${esc(user.avatarUrl)}" alt="" loading="lazy" /></span>`;
+  }
+  const a = (user && user.avatar) || { char: '?', color: '#888' };
   return `<span class="avatar ${size}" style="background:${a.color}">${esc(a.char)}</span>`;
+}
+
+async function uploadAvatar(file) {
+  if (!file) return;
+  if (!file.type.startsWith('image/')) {
+    toast('请选择图片文件');
+    return;
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    toast('图片不能超过 2MB');
+    return;
+  }
+  const fd = new FormData();
+  fd.append('avatar', file, file.name);
+  let res;
+  try {
+    res = await fetch('/api/me/avatar', { method: 'POST', body: fd });
+  } catch (e) {
+    toast('上传失败，请检查网络');
+    return;
+  }
+  let data = null;
+  try { data = await res.json(); } catch (e) {}
+  if (!res.ok) {
+    toast((data && data.error) || '上传失败');
+    return;
+  }
+  state.me = data.user;
+  toast('头像已更新 ✨', 'ok');
+  route();
 }
 
 function toast(msg, type = 'error') {
@@ -186,6 +219,15 @@ document.addEventListener('click', async (e) => {
     } else {
       toast(err.message || '操作失败');
     }
+  }
+});
+
+document.addEventListener('change', async (e) => {
+  const t = e.target;
+  if (!t || !t.dataset) return;
+  if (t.dataset.action === 'upload-avatar' && t.files && t.files[0]) {
+    await uploadAvatar(t.files[0]);
+    t.value = '';
   }
 });
 
@@ -643,7 +685,13 @@ async function renderProfile(username) {
       <div class="profile-card card">
         <div class="profile-banner"></div>
         <div class="profile-info">
-          ${avatarHTML(u, 'xl')}
+          <div class="profile-avatar-wrap">
+            ${avatarHTML(u, 'xl')}
+            ${isSelf ? `<label class="avatar-edit" title="更换头像">
+              <input type="file" accept="image/*" data-action="upload-avatar" hidden />
+              <span>📷 换头像</span>
+            </label>` : ''}
+          </div>
           <div class="profile-head">
             <h2>${esc(u.displayName)}</h2>
             <span class="post-uname">@${esc(u.username)}</span>

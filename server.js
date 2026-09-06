@@ -3,7 +3,11 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { URL } = require('node:url');
+
+const UPLOADS_DIR = path.join(__dirname, 'uploads');
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
 const Router = require('./lib/router');
 const { registerApi, registerFriendApi } = require('./lib/api');
@@ -43,6 +47,41 @@ function sendJson(res, status, obj) {
   res.end(body);
 }
 
+
+// ── Minimal multipart/form-data parser ──
+function parseMultipart(buffer, boundary) {
+  const parts = [];
+  const boundaryBuf = Buffer.from('--' + boundary);
+  const endBoundaryBuf = Buffer.from('--' + boundary + '--');
+  let start = 0;
+  while (start < buffer.length) {
+    const idx = buffer.indexOf(boundaryBuf, start);
+    if (idx === -1) break;
+    const next = buffer.indexOf(Buffer.from('\r\n\r\n'), idx);
+    if (next === -1) break;
+    const headerEnd = next + 4;
+    const nextBoundary = buffer.indexOf(boundaryBuf, headerEnd);
+    if (nextBoundary === -1) break;
+    const bodyEnd = nextBoundary - 2; // strip preceding CRLF
+    const headers = buffer.slice(idx + boundaryBuf.length + 2, next).toString('utf8');
+    const body = buffer.slice(headerEnd, bodyEnd);
+    const nameMatch = headers.match(/name="([^"]+)"/);
+    const filenameMatch = headers.match(/filename="([^"]+)"/);
+    const contentTypeMatch = headers.match(/Content-Type:\s*([^\r\n]+)/i);
+    parts.push({
+      name: nameMatch ? nameMatch[1] : null,
+      filename: filenameMatch ? filenameMatch[1] : null,
+      contentType: contentTypeMatch ? contentTypeMatch[1].trim() : 'text/plain',
+      data: body,
+    });
+    start = nextBoundary + boundaryBuf.length;
+    if (buffer.slice(start, start + 2).toString() === '--') break;
+    if (buffer[start] === 0x0d) start += 2;
+    if (buffer[start] === 0x0a) start += 1;
+  }
+  return parts;
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let size = 0;
@@ -58,8 +97,17 @@ function readBody(req) {
     });
     req.on('end', () => {
       try {
-        const raw = Buffer.concat(chunks).toString('utf8');
-        resolve(raw ? JSON.parse(raw) : {});
+        const raw = Buffer.concat(chunks);
+        const ct = req.headers['content-type'] || '';
+        if (ct.includes('multipart/form-data')) {
+          const m = ct.match(/boundary=(?:"([^"]+)"|([^;\s]+))/);
+          const boundary = m ? (m[1] || m[2]) : null;
+          if (boundary) {
+            resolve({ _multipart: parseMultipart(raw, boundary) });
+            return;
+          }
+        }
+        resolve(raw.length ? JSON.parse(raw.toString('utf8')) : {});
       } catch (e) {
         reject(Object.assign(new Error('请求体不是合法的 JSON'), { status: 400 }));
       }
@@ -125,6 +173,18 @@ const server = http.createServer(async (req, res) => {
     const method = req.method;
 
     // API
+    if (pathname.startsWith('/uploads/')) {
+      const rel = pathname.slice('/uploads/'.length);
+      const fp = path.normalize(path.join(UPLOADS_DIR, rel));
+      if (!fp.startsWith(UPLOADS_DIR + path.sep)) { res.writeHead(403); return res.end('Forbidden'); }
+      return fs.readFile(fp, (err, data) => {
+        if (err) { res.writeHead(404); return res.end('Not Found'); }
+        const ext = path.extname(fp).toLowerCase();
+        res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': 'public, max-age=86400' });
+        res.end(data);
+      });
+    }
+
     if (pathname.startsWith('/api/')) {
       if (method !== 'GET' && !originAllowed(req)) {
         return sendJson(res, 403, { error: '跨站请求被拒绝' });
