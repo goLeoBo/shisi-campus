@@ -1,0 +1,14 @@
+{
+  "name": "shisi-campus-network",
+  "version": "1.0.0",
+  "description": "十四校园网 - 类 Twitter 的校园社交网站：发动态 + 关注 + 私信聊天",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "license": "MIT"
+}
