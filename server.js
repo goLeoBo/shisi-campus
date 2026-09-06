@@ -10,7 +10,7 @@ const { registerApi, registerFriendApi } = require('./lib/api');
 const auth = require('./lib/auth');
 
 const PORT = Number(process.env.PORT) || 3000;
-const HOST = process.env.HOST || '127.0.0.1';
+const HOST = process.env.HOST || '0.0.0.0';
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MAX_BODY = 1024 * 1024; // 1MB
 
